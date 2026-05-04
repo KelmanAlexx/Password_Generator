@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <base href="/"/>
+    <ResourcePreloader/>
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]"/>
+    <link rel="stylesheet" href="@Assets["app.css"]"/>
+    <link rel="stylesheet" href="@Assets["BlazorAppXusy.styles.css"]"/>
+    <ImportMap/>
+    <link rel="icon" type="image/png" href="favicon.png"/>
+    <HeadOutlet/>
+</head>
+
+
+<script>
+    //Не удалять, без него ломается копирование
+    function copyToClipboardFromElement() {
+        const element = document.getElementById("password-display-box");
+        if (!element) return;
+
+        const text = element.innerText;
+
+        navigator.clipboard.writeText(text).then(() => {
+            console.log('Успешно скопировано напрямую через JS');
+        }).catch(err => {
+            console.error('Ошибка прямого копирования:', err);
+            
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+        });
+    }
+</script>
+
+<body>
+<Routes/>
+<ReconnectModal/>
+<script src="@Assets["_framework/blazor.web.js"]"></script>
+</body>
+
+</html>
