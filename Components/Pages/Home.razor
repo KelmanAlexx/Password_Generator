@@ -1,0 +1,251 @@
+@page "/"
+@using System.Text
+@using System.Linq
+@using Microsoft.JSInterop
+@rendermode InteractiveServer
+@inject IJSRuntime JSRuntime
+
+#nullable enable
+
+<style>
+    .main-container {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: var(--bg-color);
+        padding: 20px;
+        border-radius: 12px;
+        max-width: 800px;
+        margin: 20px auto;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    .card {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+
+    .password-display {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: var(--primary-color);
+        background: #eee;
+        padding: 10px;
+        text-align: center;
+        border-radius: 5px;
+        word-break: break-all;
+    }
+
+    .form-group { margin-bottom: 15px; }
+    label { display: block; font-weight: 500; margin-bottom: 5px; }
+    input[type="range"], input[type="text"], select { width: 100%; }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: opacity 0.2s;
+        color: white;
+    }
+
+    .btn-primary { background-color: var(--primary-color); }
+    .btn-secondary { background-color: #6c757d; }
+    .btn:hover { opacity: 0.8; }
+
+    .ini-area {
+        font-family: monospace;
+        width: 100%;
+        height: 150px;
+        margin-top: 10px;
+    }
+</style>
+
+<div class="main-container" style="--primary-color: @appSettings.MainColor; --bg-color: #f4f7f6;">
+    <h2 style="color: var(--primary-color)">🔐 PasswordGenerator & SettingsGuard</h2>
+
+    @*БЛОК ГЕНЕРАТОРА*@
+    <div class="card">
+        <h3>Генератор</h3>
+        <div id="password-display-box" class="password-display">@generatedPassword</div>
+        
+        <div class="form-group">
+            <label>Длина пароля: @appSettings.PasswordLength</label>
+            <input type="range" min="4" max="32" @bind="appSettings.PasswordLength" @bind:event="oninput" />
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" @bind="appSettings.UseSymbols" /> Использовать спецсимволы (!#$%)
+            </label>
+            <label>
+                <input type="checkbox" @bind="appSettings.UseNumbers" /> Использовать цифры (123)
+            </label>
+        </div>
+
+        <button class="btn btn-primary" @onclick="GeneratePassword">Сгенерировать</button>
+        
+        @* Вызов JS для копирования*@
+        <button class="btn btn-secondary" 
+                onclick="copyToClipboardFromElement()">
+            Копировать
+        </button>
+    </div>
+
+    @*БЛОК НАСТРОЕК INI*@
+    <div class="card">
+        <h3>Конфигурация (INI Формат)</h3>
+        <p><small>Здесь вы можете вручную отредактировать "файл" настроек.</small></p>
+        <textarea class="ini-area" @bind="iniContent" @oninput="OnIniInput"></textarea>
+        
+        <div style="margin-top: 10px;">
+            <button class="btn btn-primary" @onclick="ApplyIniSettings">Применить INI</button>
+            <button class="btn btn-secondary" @onclick="UpdateIniFromUi">Обновить INI из GUI</button>
+        </div>
+
+        <div class="form-group" style="margin-top: 15px;">
+            <label>Цвет темы (через свойства C#):</label>
+            <input type="color" @bind="appSettings.MainColor" />
+        </div>
+    </div>
+
+    @*ТАБЛИЦА ДАННЫХ*@
+    <div class="card">
+        <h3>Представление парсера</h3>
+        <table border="1" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #eee;">
+                    <th>Секция</th>
+                    <th>Ключ</th>
+                    <th>Значение</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in parsedEntries)
+                {
+                    <tr>
+                        <td>@entry.Section</td>
+                        <td>@entry.Key</td>
+                        <td>@entry.Value</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    public class IniEntry
+    {
+        public string Section { get; set; } = "General";
+        public string Key { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+
+    public class AppState
+    {
+        public int PasswordLength { get; set; } = 12;
+        public bool UseSymbols { get; set; } = true;
+        public bool UseNumbers { get; set; } = true;
+        public string MainColor { get; set; } = "#4a90e2";
+        public string LastUser { get; set; } = "Arsen";
+    }
+
+    private AppState appSettings = new();
+    private string generatedPassword = "Кликните 'Генерировать'";
+    private string iniContent = "";
+    private List<IniEntry> parsedEntries = new();
+
+    protected override void OnInitialized() => UpdateIniFromUi();
+
+    private void GeneratePassword()
+    {
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        const string nums = "0123456789";
+        const string spec = "!@#$%^&*()_+";
+
+        var pool = chars;
+        if (appSettings.UseNumbers) pool += nums;
+        if (appSettings.UseSymbols) pool += spec;
+
+        var random = new Random();
+        generatedPassword = new string(Enumerable.Repeat(pool, appSettings.PasswordLength)
+            .Select(s => s[random.Next(s.Length)]).ToArray());
+    }
+
+    private async Task CopyPassword()
+    {
+        try 
+        {
+            // JS-функция copyText
+            await JSRuntime.InvokeVoidAsync("copyText", generatedPassword);
+        }
+        catch { }
+    }
+
+    private void UpdateIniFromUi()
+    {
+        var entries = new List<IniEntry>
+        {
+            new() { Section = "Security", Key = "Length", Value = appSettings.PasswordLength.ToString() },
+            new() { Section = "Security", Key = "UseSymbols", Value = appSettings.UseSymbols.ToString() },
+            new() { Section = "Security", Key = "UseNumbers", Value = appSettings.UseNumbers.ToString() },
+            new() { Section = "Appearance", Key = "MainColor", Value = appSettings.MainColor },
+            new() { Section = "System", Key = "User", Value = appSettings.LastUser }
+        };
+        iniContent = ExportToIni(entries);
+        parsedEntries = entries;
+    }
+
+    private string ExportToIni(List<IniEntry> entries)
+    {
+        var sb = new StringBuilder();
+        foreach (var section in entries.GroupBy(e => e.Section))
+        {
+            sb.AppendLine($"[{section.Key}]");
+            foreach (var entry in section) sb.AppendLine($"{entry.Key}={entry.Value}");
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    private void ApplyIniSettings()
+    {
+        try 
+        {
+            parsedEntries = ParseIni(iniContent);
+            foreach (var entry in parsedEntries)
+            {
+                switch (entry.Key.ToLower())
+                {
+                    case "length": appSettings.PasswordLength = int.Parse(entry.Value); break;
+                    case "usesymbols": appSettings.UseSymbols = bool.Parse(entry.Value); break;
+                    case "usenumbers": appSettings.UseNumbers = bool.Parse(entry.Value); break;
+                    case "maincolor": appSettings.MainColor = entry.Value; break;
+                }
+            }
+        }
+        catch { }
+    }
+
+    private List<IniEntry> ParseIni(string content)
+    {
+        var result = new List<IniEntry>();
+        string currentSection = "General";
+        var lines = content.Split(new[] { "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            var t = line.Trim();
+            if (string.IsNullOrEmpty(t) || t.StartsWith(";")) continue;
+            if (t.StartsWith("[") && t.EndsWith("]")) currentSection = t.Substring(1, t.Length - 2);
+            else if (t.Contains('='))
+            {
+                var parts = t.Split('=', 2);
+                result.Add(new IniEntry { Section = currentSection, Key = parts[0].Trim(), Value = parts[1].Trim() });
+            }
+        }
+        return result;
+    }
+
+    private void OnIniInput(ChangeEventArgs e) => iniContent = e.Value?.ToString() ?? "";
+}
